@@ -1,0 +1,354 @@
+---
+title: "HA Data Analyst Pre-Work Exercise"
+always_allow_html: true
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+The goal of the following analysis is to understand the pattern of student enrollment across different states in the U.S. This project aims to forecast future enrollment growth and identify areas where resource allocation may need adjustment. Enrollment trends can help educational institutions respond to patterns that wax and wane in response to shifting community needs. Rapid growth can lead to overburdened facilities if under resourced. Conversely, lack of enrollment would inform organizations of a need for targeted recruitment or changes in current program structure. 
+
+I pulled data from the National Center for Education Statistics (NCES). I made a few changes to the data before uploading it. Namely, I switched the rows and columns and removed the previous predictions on the data. I chose this data because I am aware the data is small and will cause issues over the analysis, particularly in a predictive model. 
+
+Following the model creation I will conduct the appropriate analyses, and illustrate the projected enrollment % change for each state. Next, I dive into discovering possible focal points in a state where the projected percent change has increased. 
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(dplyr)
+
+Data <- read.csv("C:/Users/duran/Downloads/Enroll_Data.csv")
+# the following plot doesn't work because the x axis (Year) is a char not int so we need to change that
+# plot(x=Enroll_Data$Year ,y=Enroll_Data$Texas)
+head(Data)
+```
+
+```{r}
+plot(Data$Texas)
+```
+The initial visualization of the data revealed that the year variable was unable plot because it appeared as a character varaible and not a integer. Thus, to fix this issue I had to remove "Fall_" from every entry in the column.
+
+
+```{r}
+Data$Year <- as.numeric(sub("Fall_", "", Data$Year))
+head(Data)
+plot(x=Data$Year ,y=Data$Texas)
+```
+Notice that the data is rather spread out due to missing longitudinal data. I went back and included a placeholder for these missing values to perform further interpolation. 
+I used Multivariate Imputation by Chained Equations (MICE) to perform single imputation on the missing data, in hopes to better predict future enrollment. 
+```{r}
+Data_Missing <- read.csv("C:/Users/duran/Downloads/Enroll_Data_Missing.csv")
+
+Data_Missing$Year <- as.numeric(sub("Fall_", "", Data_Missing$Year))
+```
+Next I created a data frame with the original and imputed data to compare the distributions and decide which method has a more feasible outcome.
+```{r}
+library(mice)
+
+Imputed <- data.frame(
+  original = Data_Missing$Texas,
+  imputed_cart = complete(mice(Data_Missing, method = "cart"))$Texas,
+  imputed_lasso = complete(mice(Data_Missing, method = "lasso.norm"))$Texas
+)
+```
+
+This is for Texas only and we want to do this for the entire data set. I did an individual state to test and better view what I am working with before scaling it. I will impute the whole data set but isolate the model building to one state. This allows me to correct for potential high dimensionality, because I have many more states than years.
+```{r}
+Imputed
+```
+
+I plotted the distributions to compare the imputed data with the original dataset, and determine which best models the original data.
+
+```{r}
+library(cowplot)
+h1 <- ggplot(Imputed, aes(x = original)) +
+  geom_histogram(fill = "#ad1538", color = "#000000", position = "identity", bins = 35) +
+  ggtitle("Original distribution") +
+  theme_classic()
+h2 <- ggplot(Imputed, aes(x = imputed_cart)) +
+  geom_histogram(fill = "#1543ad", color = "#000000", position = "identity", bins = 35) +
+  ggtitle("Cart-imputed distribution") +
+  theme_classic()
+h3 <- ggplot(Imputed, aes(x = imputed_lasso)) +
+  geom_histogram(fill = "#15ad4f", color = "#000000", position = "identity", bins = 35) +
+  ggtitle("Lasso-imputed distribution") +
+  theme_classic()
+plot_grid(h1, h2, h3, nrow = 2, ncol = 2)
+```
+In this case I'm going to make three models (original data no missing values, cart-imputed data, lasso_imputed data) and compare each model. My hypothesis is that the original data will result in a better model. The imputed data appears to distort the distribution rather significantly. Normally you'd want to find another data set that you can pull the data from to fill in missing data, but I was interested challenging myself to learn and implore more complex methods with the data I already accessed. Then, I ran the imputation on the whole data set. Which I will use after the model with the original dataset is created.
+```{r}
+Cart_Data <- data.frame(complete(mice(Data_Missing, method = "cart")))
+Lasso_Data <- data.frame(complete(mice(Data_Missing, method = "lasso.norm")))
+```
+
+Next I have to prepare the data for modeling by creating the target and feature sets. I am only looking at Texas because, as mentioned before, you run into other problems due to the lack of Year data.
+
+```{r}
+#Feature set
+X <- Data$Year
+#Target set (only Texas)
+Y <- Data$Texas
+```
+
+I split the data into a 70/30 (train/test) set for the predictive model and used X as the index for training.
+```{r}
+set.seed(51)
+
+#Original
+#this is a smaller split due to the six being much smaller
+trainIndex <- createDataPartition(X, p = .70, list = FALSE, times=1)
+X_train <- X[trainIndex]
+Y_train <- Y[trainIndex]
+train_Data <- data.frame(Year = X_train, Enrollment = Y_train)
+
+X_test <- X[-trainIndex]
+Y_test <- Y[-trainIndex]
+test_Data <- data.frame(Year = X_test)
+```
+
+```{r}
+model <- train(Enrollment ~ Year, data = train_Data, method = "lm")
+summary(model)$adj.r.squared
+```
+Now lets see how the prediction holds up. I made a plot to show the actual and predicted values based on the testing data. Unfortunately, our testing data is only 2 points using the original data set because it is limited, and the model is likely over fitted. It would be easier with a more extensive data set, but, as mentioned, I chose this data set to address its limitations and work through possible solutions.
+```{r}
+
+test_data <- data.frame(Year = X_test)
+
+Y_pred <- predict(model, newdata = test_data)
+
+plot(X_test, Y_test, col = "blue", pch = 16, xlab = "Year", ylab = "Enrollment", main = "Enrollment Prediction for Texas")
+lines(X_test, Y_pred, col = "red", lwd = 2)
+legend("bottomright", legend = c("Actual", "Predicted"), col = c("blue", "red"), pch = 16, lwd = 2)
+
+```
+Now that the model is done, I want to predict the next 10 years and using that data to create an analysis where I can see all states with future percent increase or decreasse in enrollment.
+
+```{r}
+future_years <- data.frame(Year = 2023:2032)
+
+future <- predict(model, future_years)
+
+for (i in 1:nrow(future_years)) {
+  cat("Predicted enrollment for Texas in", future_years$Year[i], ":", future[i], "\n")
+}
+
+
+```
+Based on our model, Texas looks to be on a continuous climb in enrollment. Before moving to the next step lets look at how the other 2 models with imputed data hold up. First the Cart-imputed model.
+
+```{r}
+#Cart
+Cart_X <- Cart_Data$Year
+Cart_Y <- Cart_Data$Texas
+
+# Creating the train and test data
+Cart_trainIndex <- createDataPartition(Cart_X, p = .8, list = FALSE, times=1)
+Cart_X_train <- Cart_X[Cart_trainIndex]
+Cart_Y_train <- Cart_Y[Cart_trainIndex]
+Cart_train <- data.frame(Year = Cart_X_train, Enrollment = Cart_Y_train)
+
+Cart_X_test <- Cart_X[-Cart_trainIndex]
+Cart_Y_test <- Cart_Y[-Cart_trainIndex]
+Cart_test <- data.frame(Year = Cart_X_train)
+
+# Training the model
+Cart_model <- train(Enrollment ~ Year, data = Cart_train, method = "lm")
+summary(Cart_model)$adj.r.squared
+
+#creating the prediction
+Cart_test <- data.frame(Year = Cart_X_test)
+
+Cart_Y_pred <- predict(Cart_model, newdata = Cart_test)
+
+plot(Cart_X_test, Cart_Y_test, col = "blue", pch = 16, xlab = "Year", ylab = "Enrollment", main = "Enrollment Prediction for Texas")
+lines(Cart_X_test, Cart_Y_pred, col = "red", lwd = 2)
+legend("bottomright", legend = c("Actual", "Predicted"), col = c("blue", "red"), pch = 16, lwd = 2)
+```
+As predicted the model has missed the mark by miles. I am assuming this is due to how the imputation works when the missing data has a long string of continuous NA's. It becomes harder to to make a proper prediction on what the missing values could be. It very clearly gravitated to the trends from 2011-2022 causing a large spike in predicted growth. Next I will look at the Lasso-Imputation where I am expecting the same result.
+
+
+```{r}
+#Lasso
+Lasso_X <- Lasso_Data$Year
+Lasso_Y <- Lasso_Data$Texas
+
+# Creating the train and test data
+Lasso_trainIndex <- createDataPartition(Lasso_X, p = .8, list = FALSE, times=1)
+Lasso_X_train <- Lasso_X[Lasso_trainIndex]
+Lasso_Y_train <- Lasso_Y[Lasso_trainIndex]
+Lasso_train <- data.frame(Year = Lasso_X_train, Enrollment = Lasso_Y_train)
+
+Lasso_X_test <- Lasso_X[-Lasso_trainIndex]
+Lasso_Y_test <- Lasso_Y[-Lasso_trainIndex]
+Lasso_test <- data.frame(Year = Lasso_X_train)
+
+# Training the model
+Lasso_model <- train(Enrollment ~ Year, data = Lasso_train, method = "lm")
+summary(Lasso_model)$adj.r.squared
+
+#creating the prediction
+Lasso_test <- data.frame(Year = Cart_X_test)
+
+Lasso_Y_pred <- predict(Lasso_model, newdata = Lasso_test)
+
+plot(Lasso_X_test, Lasso_Y_test, col = "blue", pch = 16, xlab = "Year", ylab = "Enrollment", main = "Enrollment Prediction for Texas")
+lines(Lasso_X_test, Lasso_Y_pred, col = "red", lwd = 2)
+legend("bottomright", legend = c("Actual", "Predicted"), col = c("blue", "red"), pch = 16, lwd = 2)
+```
+The imputation fills in the missing data points, but it is how it fulfills the missing data points that causes the model to skew. A few important things to note about MICE is that it works under the assumption that there are randomized missing data points.
+
+Cart imputation uses classification and regression trees to split the data recursively into smaller subsets that minimizes any residual error. Conversely, Lasso imputation works by running a Bayesian linear regression to replace the missing data. Additionally, Lasso imputation does not assume that the data are normally distributed, so its perfect for estimating missing data values with this specific example.
+
+I ran the model a sufficient amount of times to create a data set with the predicted enrollment of each state from 2023-2032. I begin creating a geographical heat map of the US using the leaflet package. I am using the US census data from tidycensus to get the geometry variable from its data and merge it with my new data.
+
+```{r}
+library(tidycensus)
+
+Future_Data <- read.csv("C:/Users/duran/Downloads/Future_Data.csv")
+
+# All I care about is getting the geometry data but this function call requires you to have some variable. I opted for population although it is irrelevant 
+Temp <- get_acs(
+  geography = "state", 
+  year = 2019,
+  variables = c("population" = "B01001_001"),
+  geometry = TRUE)
+
+# Combing the data
+Future_Data <- left_join(
+  Future_Data, 
+  Temp %>% select(geometry,NAME), 
+  by = "NAME")
+
+```
+
+The current data contains Alaska, Hawaii, and Puerto Rico, which aren’t apart of North America. I am going to remove them from the data because I am only interested in states in North America. I also had to change my data from a DF to a SF so it can be plotted in a map.
+
+I had to do one more small data transformation, removing the percent sign from the data, so it can be read as numeric. To visualize it I used leaflet for an interactive map. I also set up some cosmetics before creating the map (color palette and pop up labels)
+
+```{r}
+
+library(leaflet)
+library(glue)
+library(sf)
+
+Future_Data <- Future_Data %>% 
+  filter(!NAME %in% c("Alaska", "Hawaii", "Puerto Rico"))
+
+Future_Data$percent_change <- as.numeric(sub("%", "", Future_Data$percent_change))
+
+Future_Data <- st_as_sf(Future_Data)
+
+Future_Data <- st_transform(Future_Data, crs = 4326)
+
+col_pal <- colorNumeric(palette = c("red", "orange", "green"), Future_Data$percent_change)
+
+label_state <- function(state, per){
+  glue("{state} % change from 2022-2031 of {per}%")
+}
+
+m1 <- Future_Data %>%
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addPolygons(weight = 1,
+              color = "black",
+              fillColor = ~col_pal(percent_change),
+              fillOpacity = 1,
+              popup = ~label_state(NAME, percent_change),
+              highlightOptions = highlightOptions(
+                weight = 3,
+                color = "#666",
+                fillOpacity = 0.7,
+                bringToFront = TRUE)) %>% 
+  addLegend(pal = col_pal,
+            values = ~percent_change,
+            opacity = .5,
+            labFormat = labelFormat(suffix = " %"))
+m1
+
+```
+
+The plot above shows the percent change from 2022 to 2032 depicting which states will experience an increase or decrease in enrollment. This will impact decision making when it comes to determining where to place possible schools, preparing for future influx of students, and finding areas with a need to increases enrollment.
+
+To provide an actionable recommendation, I have to look at individual states. Based on the graph, Texas may experience a sizable increase in enrollment. Idea Public schools has most of its schools located in Texas, thus it is worth looking into. I want to locate any regions in Texas where there’s an expected influx of student enrollment to inform which schools should be considered for possible budget increases, additional staffing, and possible new school construction
+
+To make the analysis possible I had downloaded child population data from Texas Open Data Portal. I intend to use it to find hot-spots where the child population is larger than the average. Similar to before, I used the census data to get the necessary mapping info.
+
+```{r}
+
+Child_data <- read.csv("C:/Users/duran/Downloads/CPI_1.1_Texas_Child_Population__ages_0-17__by_County_2014-2023_20250125.csv")
+
+# Removing years that aren't 2022
+Child_data <- Child_data %>%
+  filter(Year == 2022)
+
+# Removing irrelevant Rowws
+Child_data <- Child_data %>% 
+  filter(!Region == "All Regions")
+
+# Reading in Census Data
+Temp <- get_acs(
+  geography = "county",
+  year = 2019,
+  variables = c("population" = "B01001_001"), 
+  geometry = TRUE)
+
+# Removing all data that is not Texas
+Temp <- Temp %>%
+  filter(grepl("Texas", NAME))
+
+# Formatting the columns to match each other
+Temp$NAME <- sub(" County, Texas", "", Temp$NAME)
+Temp <- Temp %>% rename(County = NAME)
+
+# Joining the data
+Child_data <- left_join(
+  Child_data, 
+  Temp %>% select(geometry,County), 
+  by = "County")
+
+```
+
+With all the data formatted and ready to go we can make the visualization. I am using the data from 2022 because I am looking at the percent change staring from 2022. It is safe to assume the child population should receive a similar increase or decrease, because for enrollment to increase there has to be an increase in the amount of children in that population. Therfore, using the child population data from Texas I can pinpoint the areas that are expecting the largest influx. To plot the data I will be using similar methods as before.
+
+```{r}
+
+Child_data <- st_as_sf(Child_data)
+
+Child_data <- st_transform(Child_data, crs = 4326)
+
+col_pal_2 <- colorNumeric(palette = c("red", "orange", "green"), Child_data$Percent_Children)
+
+label_state <- function(county, per){
+  glue("{county} % childern in population {per}%")
+}
+
+m2 <- Child_data %>%
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addPolygons(weight = 1,
+              color = "black",
+              fillColor = ~col_pal_2(Percent_Children),
+              fillOpacity = 1,
+              popup = ~label_state(County, Percent_Children),
+              highlightOptions = highlightOptions(
+                weight = 3,
+                color = "#666",
+                fillOpacity = 0.3,
+                bringToFront = TRUE)) %>% 
+  addLegend(pal = col_pal_2,
+            values = ~Percent_Children,
+            opacity = .5,
+            labFormat = labelFormat(suffix = " %"))
+m2
+
+mean(Child_data$Percent_Children)
+
+```
+
+Along with the map I also looked at the average percent of children in a population across Texas counties. I did this to set a baseline for which I will use to deiced the counties that are worth looking into.
+
+Based on the above analyses, there are a handful of areas worth investigating. Considering where IDEA already has a considerable amount of schools, I suggest further investigating Houston, Dallas, San Antonio, Austin, and San Juan. First Houston, Dallas, Austin, and San Antonio are all on par with the average percent of children in the population. Those areas wouldn’t need much of a focus, I’d suggest preparing to scale the programs of the schools in that region to match the predicted increase in enrollment. for example, budget increases, preparing for additional staffing, increased classroom sizes, enhancing facilitates, and possible ingratiation of new technology. Lastly San Juan, is about 7%-10% higher than the average county. IDEA has already spread out a significant amount of schools from Reynosa to Maramoros. I would advise on further expanding the network of schools to the west in that region.
+
+Furthermore, the visualization revealed 1 possible area that would be worth expanding into. Starr County has 29 schools and a Child population of 19960. Starr County also is close to IDEA’s network of schools around San Juan. There is only one IDEA school in that region which is expected growth based on the analysis. There is a perfect opportunity to expand in a region already familiar to the company. The addition of a second school in that area could be beneficial and a proactive move to the expected change.
