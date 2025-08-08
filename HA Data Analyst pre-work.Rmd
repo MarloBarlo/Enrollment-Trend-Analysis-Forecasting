@@ -18,7 +18,7 @@ library(tidyverse)
 library(caret)
 library(dplyr)
 
-Data <- read.csv("C:/Users/duran/Downloads/Enroll_Data.csv")
+Data <- read.csv("Enroll_Data.csv")
 # the following plot doesn't work because the x axis (Year) is a char not int so we need to change that
 # plot(x=Enroll_Data$Year ,y=Enroll_Data$Texas)
 head(Data)
@@ -352,3 +352,4 @@ Along with the map I also looked at the average percent of children in a populat
 Based on the above analyses, there are a handful of areas worth investigating. Considering where IDEA already has a considerable amount of schools, I suggest further investigating Houston, Dallas, San Antonio, Austin, and San Juan. First Houston, Dallas, Austin, and San Antonio are all on par with the average percent of children in the population. Those areas wouldn’t need much of a focus, I’d suggest preparing to scale the programs of the schools in that region to match the predicted increase in enrollment. for example, budget increases, preparing for additional staffing, increased classroom sizes, enhancing facilitates, and possible ingratiation of new technology. Lastly San Juan, is about 7%-10% higher than the average county. IDEA has already spread out a significant amount of schools from Reynosa to Maramoros. I would advise on further expanding the network of schools to the west in that region.
 
 Furthermore, the visualization revealed 1 possible area that would be worth expanding into. Starr County has 29 schools and a Child population of 19960. Starr County also is close to IDEA’s network of schools around San Juan. There is only one IDEA school in that region which is expected growth based on the analysis. There is a perfect opportunity to expand in a region already familiar to the company. The addition of a second school in that area could be beneficial and a proactive move to the expected change.
+
